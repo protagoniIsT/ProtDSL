@@ -6,6 +6,7 @@ require_relative "Target/RISC-V/ir_ops"
 require_relative "Generic/builder"
 require_relative "Target/RISC-V/config"
 require_relative "Target/RISC-V/32I"
+require_relative "Target/RISC-V/32M"
 
 class DecodeTreeBuilder
     InsnEncoding = Struct.new(:name, :mask, :match, :info)
