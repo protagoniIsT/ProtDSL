@@ -1,9 +1,5 @@
-# Testing infra
-
 module SimInfra
-    # @@instructions -array of instruction description
-    # shows result of our tests in interactive Ruby (IRB) or standalone
-    def self.serialize(msg= nil)
+    def self.serialize(msg = nil)
         return @@instructions if Object.const_defined?(:IRB)
         require 'yaml'
         yaml_data = YAML.dump(@@instructions.map(&:to_h))
@@ -13,13 +9,24 @@ module SimInfra
         end
     end
 
-    # reset state
-    def siminfra_reset_module_state; @@instructions = []; end
+    def self.instructions
+        @@instructions
+    end
 
-    # mixin for global counter, function returns 0,1,2,....
+    # reset state
+    def siminfra_reset_module_state
+        @@instructions = []
+    end
+
+    # mixin for global counter, function returns 0,1,2,...
     module GlobalCounter
         @@counter = -1
-        def next_counter; @@counter += 1; end
+        def next_counter
+            @@counter += 1
+        end
+        def self.reset
+            @@counter = -1
+        end
     end
 
     Field = Struct.new(:name, :from, :to, :value)
@@ -28,9 +35,12 @@ module SimInfra
     def field(name, from, to, value = nil)
         Field.new(name, from, to, value).freeze
     end
+
     def immpart(name, from, to, hi, lo)
         ImmFieldPart.new(name, from, to, hi, lo).freeze
     end
 
-    def assert(condition, msg = nil); raise msg if !condition; end
+    def assert(condition, msg = nil)
+        raise msg if !condition
+    end
 end
