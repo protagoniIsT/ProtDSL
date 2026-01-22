@@ -2,7 +2,7 @@
 #ifndef DECODER_H
 #define DECODER_H
 
-#include "../simlib/defs.h"
+#include "defs.h"
 #include "../simlib/sext.h"
 
 enum class Opcode {

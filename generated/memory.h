@@ -1,5 +1,6 @@
-#ifndef SIMLIB_MEMORY_H
-#define SIMLIB_MEMORY_H
+// Auto generated from ProtDSL
+#ifndef MEMORY_H
+#define MEMORY_H
 
 #include <cstdint>
 #include <cstring>
@@ -8,8 +9,8 @@
 
 class Memory {
 public:
-    static constexpr word_t MEM_SIZE = 128 * 1024 * 1024; // 128 MB
-    static constexpr word_t MEM_BASE = 0x80000000;
+    static constexpr word_t BASE = MEM_BASE;
+    static constexpr word_t SIZE = MEM_SIZE;
 
 private:
     uint8_t* data;
@@ -18,19 +19,16 @@ private:
 
 public:
     Memory() : tohost_addr(0), tohost_written(false) {
-        data = new uint8_t[MEM_SIZE];
-        memset(data, 0, MEM_SIZE);
+        data = new uint8_t[SIZE];
+        memset(data, 0, SIZE);
     }
 
-    ~Memory() {
-        delete[] data;
-    }
-
+    ~Memory() { delete[] data; }
     Memory(const Memory&) = delete;
     Memory& operator=(const Memory&) = delete;
 
     void reset() {
-        memset(data, 0, MEM_SIZE);
+        memset(data, 0, SIZE);
         tohost_written = false;
     }
 
@@ -43,12 +41,8 @@ public:
     void clear_tohost_written() { tohost_written = false; }
 
     word_t translate_addr(word_t addr, word_t pc) const {
-        if (addr >= MEM_BASE && addr < MEM_BASE + MEM_SIZE) {
-            return addr - MEM_BASE;
-        }
-        if (addr < MEM_SIZE) {
-            return addr;
-        }
+        if (addr >= BASE && addr < BASE + SIZE) return addr - BASE;
+        if (addr < SIZE) return addr;
         fprintf(stderr, "Invalid memory access at 0x%08x (PC=0x%08x)\n", addr, pc);
         return 0;
     }
@@ -93,10 +87,8 @@ public:
 
 private:
     void check_tohost(word_t addr) {
-        if (tohost_addr != 0 && addr == tohost_addr) {
-            tohost_written = true;
-        }
+        if (tohost_addr != 0 && addr == tohost_addr) tohost_written = true;
     }
 };
 
-#endif // SIMLIB_MEMORY_H
+#endif

@@ -2,8 +2,9 @@
 #ifndef HART_H
 #define HART_H
 
-#include "../simlib/cpu_state.h"
-#include "../simlib/memory.h"
+#include "defs.h"
+#include "cpu_state.h"
+#include "memory.h"
 #include "decoder.h"
 #include "executor.h"
 

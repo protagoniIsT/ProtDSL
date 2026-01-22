@@ -2,7 +2,8 @@
 #ifndef MACHINE_H
 #define MACHINE_H
 
-#include "../simlib/memory.h"
+#include "defs.h"
+#include "memory.h"
 #include "../simlib/elf_loader.h"
 #include "hart.h"
 

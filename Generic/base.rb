@@ -1,8 +1,16 @@
 module SimInfra
+    @@cpu_config = nil
+
     def self.serialize(msg = nil)
         return @@instructions if Object.const_defined?(:IRB)
         require 'yaml'
-        yaml_data = YAML.dump(@@instructions.map(&:to_h))
+        
+        ir_data = {
+            cpu_config: @@cpu_config&.to_h,
+            instructions: @@instructions.map(&:to_h)
+        }
+        
+        yaml_data = YAML.dump(ir_data)
 
         File.open("IR.yaml", "w") do |file|
             file.write(yaml_data)
@@ -11,6 +19,14 @@ module SimInfra
 
     def self.instructions
         @@instructions
+    end
+
+    def self.cpu_config
+        @@cpu_config
+    end
+
+    def self.cpu_config=(config)
+        @@cpu_config = config
     end
 
     # reset state

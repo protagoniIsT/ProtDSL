@@ -2,9 +2,9 @@
 #ifndef EXECUTOR_H
 #define EXECUTOR_H
 
-#include "../simlib/defs.h"
-#include "../simlib/cpu_state.h"
-#include "../simlib/memory.h"
+#include "defs.h"
+#include "cpu_state.h"
+#include "memory.h"
 #include "decoder.h"
 
 class Executor {

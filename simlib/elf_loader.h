@@ -3,12 +3,12 @@
 
 #include <elfio/elfio.hpp>
 #include <cstring>
-#include "defs.h"
-#include "memory.h"
+#include <cstdint>
 
-class ElfLoader {
+template<typename MemoryT>
+class ElfLoaderImpl {
 public:
-    static bool load(const char* filename, Memory& mem, word_t& entry) {
+    static bool load(const char* filename, MemoryT& mem, uint32_t& entry) {
         ELFIO::elfio reader;
         
         if (!reader.load(filename)) {
@@ -21,16 +21,16 @@ public:
             return false;
         }
 
-        entry = static_cast<word_t>(reader.get_entry());
+        entry = static_cast<uint32_t>(reader.get_entry());
 
         for (const auto& seg : reader.segments) {
             if (seg->get_type() != ELFIO::PT_LOAD) continue;
 
-            word_t vaddr = static_cast<word_t>(seg->get_virtual_address());
-            word_t filesz = static_cast<word_t>(seg->get_file_size());
-            word_t memsz = static_cast<word_t>(seg->get_memory_size());
+            uint32_t vaddr = static_cast<uint32_t>(seg->get_virtual_address());
+            uint32_t filesz = static_cast<uint32_t>(seg->get_file_size());
+            uint32_t memsz = static_cast<uint32_t>(seg->get_memory_size());
 
-            word_t phys = mem.translate_addr(vaddr, 0);
+            uint32_t phys = mem.translate_addr(vaddr, 0);
             
             if (filesz > 0) {
                 memcpy(mem.raw() + phys, seg->get_data(), filesz);
@@ -47,7 +47,7 @@ public:
     }
 
 private:
-    static void find_tohost(const ELFIO::elfio& reader, Memory& mem) {
+    static void find_tohost(const ELFIO::elfio& reader, MemoryT& mem) {
         for (const auto& sec : reader.sections) {
             if (sec->get_type() != ELFIO::SHT_SYMTAB) continue;
 
@@ -63,7 +63,7 @@ private:
                 symbols.get_symbol(i, name, value, size, bind, type, section_index, other);
                 
                 if (name == "tohost") {
-                    mem.set_tohost_addr(static_cast<word_t>(value));
+                    mem.set_tohost_addr(static_cast<uint32_t>(value));
                     return;
                 }
             }
@@ -71,4 +71,7 @@ private:
     }
 };
 
-#endif // SIMLIB_ELF_LOADER_H
+class Memory;
+using ElfLoader = ElfLoaderImpl<Memory>;
+
+#endif

@@ -1,8 +1,10 @@
 #!/usr/bin/ruby
 
 require_relative "Generic/base"
+require_relative "Generic/regfile_config"
 require_relative "Target/RISC-V/ir_ops"
 require_relative "Generic/builder"
+require_relative "Target/RISC-V/config"
 require_relative "Target/RISC-V/32I"
 
 class DecodeTreeBuilder
@@ -227,8 +229,9 @@ end
 
 
 class CppGenerator
-    def initialize(instructions)
+    def initialize(instructions, cpu_config = nil)
         @instructions = instructions
+        @cpu_config = cpu_config || SimInfra.cpu_config
         @output_dir = "generated"
         @tree_builder = DecodeTreeBuilder.new(instructions)
         @decode_tree = @tree_builder.build_tree
@@ -237,6 +240,9 @@ class CppGenerator
     def generate
         Dir.mkdir(@output_dir) unless Dir.exist?(@output_dir)
         
+        generate_defs_h
+        generate_cpu_state_h
+        generate_memory_h
         generate_decoder_h
         generate_executor_h
         generate_executor_cpp
@@ -246,11 +252,242 @@ class CppGenerator
         generate_machine_cpp
         generate_main_cpp
         generate_makefile
-        
-        puts "Generated files in #{@output_dir}/"
     end
 
     private
+
+    def get_word_type
+        return "uint32_t" unless @cpu_config
+        case @cpu_config.word_size
+        when 32 then "uint32_t"
+        when 64 then "uint64_t"
+        else "uint32_t"
+        end
+    end
+
+    def get_sword_type
+        return "int32_t" unless @cpu_config
+        case @cpu_config.word_size
+        when 32 then "int32_t"
+        when 64 then "int64_t"
+        else "int32_t"
+        end
+    end
+
+    def get_num_regs
+        return 32 unless @cpu_config && @cpu_config.reg_files[:x]
+        @cpu_config.reg_files[:x].num_regs
+    end
+
+    def get_zero_reg
+        return 0 unless @cpu_config && @cpu_config.reg_files[:x]
+        @cpu_config.reg_files[:x].zero_reg
+    end
+
+    def get_insn_size
+        return 4 unless @cpu_config
+        @cpu_config.insn_size
+    end
+
+    def get_mem_base
+        return 0x80000000 unless @cpu_config
+        @cpu_config.memory_config.base_addr
+    end
+
+    def get_mem_size
+        return 128 * 1024 * 1024 unless @cpu_config
+        @cpu_config.memory_config.mem_size
+    end
+
+    def get_reset_pc
+        return 0x80000000 unless @cpu_config
+        @cpu_config.reset_config.pc_value
+    end
+
+    def generate_defs_h
+        word_type = get_word_type
+        sword_type = get_sword_type
+        num_regs = get_num_regs
+        insn_size = get_insn_size
+        mem_base = get_mem_base
+        mem_size = get_mem_size
+        reset_pc = get_reset_pc
+        
+        code = <<~CPP
+        // Auto generated from ProtDSL
+        #ifndef DEFS_H
+        #define DEFS_H
+
+        #include <cstdint>
+
+        using word_t = #{word_type};
+        using sword_t = #{sword_type};
+        using dword_t = uint64_t;
+        using sdword_t = int64_t;
+
+        constexpr word_t INSN_SIZE = #{insn_size};
+        constexpr int NUM_REGS = #{num_regs};
+        constexpr word_t MEM_BASE = 0x#{mem_base.to_s(16)}u;
+        constexpr word_t MEM_SIZE = #{mem_size}u;
+        constexpr word_t RESET_PC = 0x#{reset_pc.to_s(16)}u;
+
+        #endif
+        CPP
+
+        File.write("#{@output_dir}/defs.h", code)
+    end
+
+    def generate_cpu_state_h
+        zero_reg = get_zero_reg
+        zero_check = zero_reg ? "if (rd != #{zero_reg}) " : ""
+        zero_read = zero_reg ? "(rs == #{zero_reg}) ? 0 : " : ""
+        
+        code = <<~CPP
+        // Auto generated from ProtDSL
+        #ifndef CPU_STATE_H
+        #define CPU_STATE_H
+
+        #include "defs.h"
+
+        class Memory;
+
+        struct CpuState {
+            word_t regs[NUM_REGS];
+            word_t pc;
+            word_t next_pc;
+            bool running;
+            int exit_code;
+            uint64_t insn_count;
+            Memory* mem;
+
+            CpuState() : running(false), exit_code(0), insn_count(0), mem(nullptr) {
+                reset();
+            }
+
+            void reset() {
+                for (int i = 0; i < NUM_REGS; i++) regs[i] = 0;
+                pc = RESET_PC;
+                next_pc = pc + INSN_SIZE;
+                running = true;
+                exit_code = 0;
+                insn_count = 0;
+            }
+
+            void write_reg(int rd, word_t val) {
+                #{zero_check}regs[rd] = val;
+            }
+
+            word_t read_reg(int rs) const {
+                return #{zero_read}regs[rs];
+            }
+        };
+
+        #endif
+        CPP
+
+        File.write("#{@output_dir}/cpu_state.h", code)
+    end
+
+    def generate_memory_h
+        code = <<~CPP
+        // Auto generated from ProtDSL
+        #ifndef MEMORY_H
+        #define MEMORY_H
+
+        #include <cstdint>
+        #include <cstring>
+        #include <cstdio>
+        #include "defs.h"
+
+        class Memory {
+        public:
+            static constexpr word_t BASE = MEM_BASE;
+            static constexpr word_t SIZE = MEM_SIZE;
+
+        private:
+            uint8_t* data;
+            word_t tohost_addr;
+            bool tohost_written;
+
+        public:
+            Memory() : tohost_addr(0), tohost_written(false) {
+                data = new uint8_t[SIZE];
+                memset(data, 0, SIZE);
+            }
+
+            ~Memory() { delete[] data; }
+            Memory(const Memory&) = delete;
+            Memory& operator=(const Memory&) = delete;
+
+            void reset() {
+                memset(data, 0, SIZE);
+                tohost_written = false;
+            }
+
+            uint8_t* raw() { return data; }
+            const uint8_t* raw() const { return data; }
+
+            void set_tohost_addr(word_t addr) { tohost_addr = addr; }
+            word_t get_tohost_addr() const { return tohost_addr; }
+            bool was_tohost_written() const { return tohost_written; }
+            void clear_tohost_written() { tohost_written = false; }
+
+            word_t translate_addr(word_t addr, word_t pc) const {
+                if (addr >= BASE && addr < BASE + SIZE) return addr - BASE;
+                if (addr < SIZE) return addr;
+                fprintf(stderr, "Invalid memory access at 0x%08x (PC=0x%08x)\\n", addr, pc);
+                return 0;
+            }
+
+            uint8_t load8(word_t addr, word_t pc) const {
+                word_t phys = translate_addr(addr, pc);
+                return data[phys];
+            }
+
+            uint16_t load16(word_t addr, word_t pc) const {
+                word_t phys = translate_addr(addr, pc);
+                return data[phys] | (data[phys + 1] << 8);
+            }
+
+            uint32_t load32(word_t addr, word_t pc) const {
+                word_t phys = translate_addr(addr, pc);
+                return data[phys] | (data[phys + 1] << 8) |
+                       (data[phys + 2] << 16) | (data[phys + 3] << 24);
+            }
+
+            void store8(word_t addr, uint8_t val, word_t pc) {
+                word_t phys = translate_addr(addr, pc);
+                data[phys] = val;
+                check_tohost(addr);
+            }
+
+            void store16(word_t addr, uint16_t val, word_t pc) {
+                word_t phys = translate_addr(addr, pc);
+                data[phys] = val & 0xFF;
+                data[phys + 1] = (val >> 8) & 0xFF;
+                check_tohost(addr);
+            }
+
+            void store32(word_t addr, word_t val, word_t pc) {
+                word_t phys = translate_addr(addr, pc);
+                data[phys] = val & 0xFF;
+                data[phys + 1] = (val >> 8) & 0xFF;
+                data[phys + 2] = (val >> 16) & 0xFF;
+                data[phys + 3] = (val >> 24) & 0xFF;
+                check_tohost(addr);
+            }
+
+        private:
+            void check_tohost(word_t addr) {
+                if (tohost_addr != 0 && addr == tohost_addr) tohost_written = true;
+            }
+        };
+
+        #endif
+        CPP
+
+        File.write("#{@output_dir}/memory.h", code)
+    end
 
     def collect_operand_fields
         fields = {}
@@ -317,7 +554,7 @@ class CppGenerator
         #ifndef DECODER_H
         #define DECODER_H
 
-        #include "../simlib/defs.h"
+        #include "defs.h"
         #include "../simlib/sext.h"
 
         enum class Opcode {
@@ -385,9 +622,9 @@ class CppGenerator
         #ifndef EXECUTOR_H
         #define EXECUTOR_H
 
-        #include "../simlib/defs.h"
-        #include "../simlib/cpu_state.h"
-        #include "../simlib/memory.h"
+        #include "defs.h"
+        #include "cpu_state.h"
+        #include "memory.h"
         #include "decoder.h"
 
         class Executor {
@@ -439,22 +676,21 @@ class CppGenerator
         pfx = " " * indent
         case insn.name
         when :ECALL then ecall_code(pfx)
-        when :EBREAK then "#{pfx}cpu.running = false; // EBREAK"
-        when :FENCE then "#{pfx}// FENCE - no-op"
+        when :EBREAK then "#{pfx}cpu.running = false;"
+        when :FENCE then "#{pfx};"
         else
-            return "#{pfx}// #{insn.name} - no code" unless insn.code
+            return "#{pfx};" unless insn.code
             compiler = IrCompiler.new(insn.code, insn.args, insn.format, insn.fields)
-            "#{pfx}// #{insn.name}\n" + compiler.compile.lines.map { |l| "#{pfx}#{l.rstrip}" }.join("\n")
+            compiler.compile.lines.map { |l| "#{pfx}#{l.rstrip}" }.join("\n")
         end
     end
 
     def ecall_code(pfx)
         <<~CPP.lines.map { |l| "#{pfx}#{l.rstrip}" }.join("\n")
-// ECALL
 {
     word_t a7 = cpu.read_reg(17);
     switch (a7) {
-        case 64: { // write
+        case 64: {
             word_t fd = cpu.read_reg(10);
             word_t buf = cpu.read_reg(11);
             word_t len = cpu.read_reg(12);
@@ -477,8 +713,9 @@ class CppGenerator
         #ifndef HART_H
         #define HART_H
 
-        #include "../simlib/cpu_state.h"
-        #include "../simlib/memory.h"
+        #include "defs.h"
+        #include "cpu_state.h"
+        #include "memory.h"
         #include "decoder.h"
         #include "executor.h"
 
@@ -522,7 +759,8 @@ class CppGenerator
         #ifndef MACHINE_H
         #define MACHINE_H
 
-        #include "../simlib/memory.h"
+        #include "defs.h"
+        #include "memory.h"
         #include "../simlib/elf_loader.h"
         #include "hart.h"
 
@@ -590,18 +828,18 @@ class CppGenerator
         code = <<~MAKE
         # Auto generated from ProtDSL
         CXX = g++
-        CXXFLAGS = -O2 -Wall -std=c++17 -I../simlib
+        CXXFLAGS = -O2 -Wall -Wno-sign-compare -std=c++17 -I../simlib
         TARGET = rv32im_sim
         SRCS = main.cpp machine.cpp hart.cpp executor.cpp
         OBJS = $(SRCS:.cpp=.o)
 
         all: $(TARGET)
         $(TARGET): $(OBJS)
-        \t$(CXX) $(CXXFLAGS) -o $@ $^
+        \t@$(CXX) $(CXXFLAGS) -o $@ $^
         %.o: %.cpp
-        \t$(CXX) $(CXXFLAGS) -c $< -o $@
+        \t@$(CXX) $(CXXFLAGS) -c $< -o $@
         clean:
-        \trm -f $(OBJS) $(TARGET)
+        \t@rm -f $(OBJS) $(TARGET)
         .PHONY: all clean
         MAKE
 
